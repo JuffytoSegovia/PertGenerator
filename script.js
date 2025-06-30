@@ -200,34 +200,36 @@ function calculatePERT() {
             const newTF = newTE + activity.duration;
             
             if (newTE !== act.te || newTF !== act.tf) {
-                console.log(`${activity.name}: TE ${act.te}->${newTE}, TF ${act.tf}->${newTF}`);
                 act.te = newTE;
                 act.tf = newTF;
                 changed = true;
+                console.log(`${activity.name}: TE=${newTE}, TF=${newTF}`);
             }
         });
     }
+    
+    console.log('Forward pass completado en', iterations, 'iteraciones');
 
-    const projectDuration = Math.max(...Object.values(activityMap).map(act => act.tf));
+    // Encontrar duración total del proyecto
+    const projectDuration = Math.max(...activities.map(a => activityMap[a.name].tf));
     console.log('Duración total del proyecto:', projectDuration);
 
-    // BACKWARD PASS CORREGIDO
+    // BACKWARD PASS: Calcular TL y TI
     console.log('--- BACKWARD PASS ---');
     
-    // Paso 1: Identificar actividades finales
-    const finalActivities = activities.filter(activity => {
-        return !activities.some(act => act.predecessors.includes(activity.name));
-    });
-    
-    console.log('Actividades finales:', finalActivities.map(act => act.name));
-    
-    // Inicializar TL para actividades finales
-    finalActivities.forEach(activity => {
-        activityMap[activity.name].tl = projectDuration;
-        console.log(`${activity.name} es actividad final, TL = ${projectDuration}`);
+    // Inicializar TL para actividades sin sucesoras
+    activities.forEach(activity => {
+        const hasSuccessors = activities.some(act => 
+            act.predecessors.includes(activity.name)
+        );
+        
+        if (!hasSuccessors) {
+            activityMap[activity.name].tl = projectDuration;
+            console.log(`${activity.name} no tiene sucesoras, TL = ${projectDuration}`);
+        }
     });
 
-    // Paso 2: Propagar hacia atrás
+    // Calcular TL para las demás actividades
     changed = true;
     iterations = 0;
     while (changed && iterations < 100) {
@@ -237,33 +239,23 @@ function calculatePERT() {
         activities.forEach(activity => {
             const act = activityMap[activity.name];
             
-            // Si ya tiene TL calculado, saltar
-            if (act.tl >= 0) return;
-            
-            // Buscar todos los sucesores
-            const successors = activities.filter(succ => 
-                succ.predecessors.includes(activity.name)
-            );
-            
-            if (successors.length > 0) {
-                // Verificar si TODOS los sucesores tienen TL calculado
-                const allSuccessorsCalculated = successors.every(succ => 
-                    activityMap[succ.name].tl >= 0
+            if (act.tl === -1) {
+                const successors = activities.filter(a => 
+                    a.predecessors.includes(activity.name)
                 );
                 
-                if (allSuccessorsCalculated) {
-                    // CORRECCIÓN: TL = MÍNIMO de los TE (no TI) de todos los sucesores
-                    const successorTEs = successors.map(succ => {
-                        const succData = activityMap[succ.name];
-                        console.log(`  Sucesor ${succ.name}: TE=${succData.te}`);
-                        return succData.te;
+                if (successors.length > 0) {
+                    const successorTLs = successors.map(s => {
+                        const succAct = activityMap[s.name];
+                        return succAct.tl !== -1 ? succAct.tl - s.duration : Infinity;
                     });
                     
-                    const minTE = Math.min(...successorTEs);
-                    act.tl = minTE;
-                    changed = true;
-                    
-                    console.log(`${activity.name}: TL = min(${successorTEs.join(',')}) = ${minTE}`);
+                    if (!successorTLs.includes(Infinity)) {
+                        const minTL = Math.min(...successorTLs);
+                        act.tl = minTL;
+                        changed = true;
+                        console.log(`${activity.name}: TL = ${minTL}`);
+                    }
                 }
             }
         });
@@ -271,15 +263,31 @@ function calculatePERT() {
 
     console.log('Backward pass completado en', iterations, 'iteraciones');
 
-    // Paso 3: Calcular TI, Holgura e identificar ruta crítica
+    // Calcular TI, Holgura e identificar ruta crítica
     activities.forEach(activity => {
         const act = activityMap[activity.name];
         act.ti = act.tl - activity.duration;
         act.slack = act.ti - act.te;
-        // CORRECCIÓN: Usar tolerancia mínima para comparación
         act.isCritical = Math.abs(act.slack) < 0.0001;
         
         console.log(`${activity.name}: TI=${act.ti}, Slack=${act.slack}, Crítica=${act.isCritical}`);
+    });
+
+    // Calcular tiempos PERT (To, Tm, Tp, σ, Varianza)
+    activities.forEach(activity => {
+        const act = activityMap[activity.name];
+        
+        // Cálculos PERT
+        act.to = Math.max(1, activity.duration - 1);  // Tiempo optimista (mínimo 1)
+        act.tm = activity.duration;                    // Tiempo más probable
+        act.tp = activity.duration + 2;                // Tiempo pesimista
+        act.te = activity.duration;                    // Tiempo esperado (ya lo teníamos)
+        
+        // Desviación estándar y varianza
+        act.sigma = (act.tp - act.to) / 6;
+        act.variance = Math.pow(act.sigma, 2);
+        
+        console.log(`${activity.name}: To=${act.to}, Tm=${act.tm}, Tp=${act.tp}, σ=${act.sigma.toFixed(2)}, Var=${act.variance.toFixed(2)}`);
     });
 
     console.log('=== CÁLCULO PERT COMPLETADO ===');
@@ -295,72 +303,104 @@ function findCriticalPath(activityMap) {
 }
 
 function createLegend() {
-    const legendSvg = `
-        <div style="background: #f8f9fa; border: 2px solid #dee2e6; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-            <h4 style="margin-bottom: 15px; color: #495057;">Leyenda del Diagrama PERT:</h4>
-            <div style="display: flex; align-items: center; gap: 30px; flex-wrap: wrap;">
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <svg width="120" height="120" viewBox="0 0 120 120">
-                        <circle cx="60" cy="60" r="58" fill="#e3f2fd" stroke="#1976d2" stroke-width="4"/>
-                        <text x="60" y="25" text-anchor="middle" font-size="16" font-weight="bold" fill="#1a1a1a">A</text>
-                        <line x1="20" y1="45" x2="100" y2="45" stroke="#666" stroke-width="1"/>
-                        <text x="30" y="60" text-anchor="middle" font-size="11" font-weight="600">TE</text>
-                        <text x="60" y="60" text-anchor="middle" font-size="11" font-weight="600">Dur</text>
-                        <text x="90" y="60" text-anchor="middle" font-size="11" font-weight="600">TF</text>
-                        <text x="30" y="85" text-anchor="middle" font-size="11" font-weight="600">TI</text>
-                        <text x="60" y="85" text-anchor="middle" font-size="11" font-weight="600">Hol</text>
-                        <text x="90" y="85" text-anchor="middle" font-size="11" font-weight="600">TL</text>
-                    </svg>
-                    <div>
-                        <p><strong>Nodo Normal</strong></p>
-                        <p style="font-size: 12px; margin: 5px 0;">• <strong>A:</strong> Nombre de la actividad</p>
-                        <p style="font-size: 12px; margin: 5px 0;">• <strong>TE:</strong> Tiempo Emprano de Inicio</p>
-                        <p style="font-size: 12px; margin: 5px 0;">• <strong>Dur:</strong> Duración de la actividad</p>
-                        <p style="font-size: 12px; margin: 5px 0;">• <strong>TF:</strong> Tiempo Temprano de Fin</p>
-                        <p style="font-size: 12px; margin: 5px 0;">• <strong>TI:</strong> Tiempo Tardío de Inicio</p>
-                        <p style="font-size: 12px; margin: 5px 0;">• <strong>Hol:</strong> Holgura (TI - TE)</p>
-                        <p style="font-size: 12px; margin: 5px 0;">• <strong>TL:</strong> Tiempo Tardío de Fin</p>
+    const legendHtml = `
+        <div id="legendContainer" style="position: fixed; top: 20px; right: 20px; z-index: 1000; max-width: 350px;">
+            <div id="legendToggle" style="background: #667eea; color: white; padding: 10px 15px; border-radius: 8px 8px 0 0; cursor: pointer; display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: bold;">📊 Leyenda PERT</span>
+                <span id="toggleIcon" style="font-size: 18px;">▼</span>
+            </div>
+            <div id="legendContent" style="background: white; border: 2px solid #667eea; border-top: none; border-radius: 0 0 8px 8px; padding: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); max-height: 70vh; overflow-y: auto;">
+                <div style="display: flex; flex-direction: column; gap: 20px;">
+                    <!-- Nodo Normal -->
+                    <div style="display: flex; align-items: center; gap: 15px; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                        <svg width="100" height="100" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="48" fill="#e3f2fd" stroke="#1976d2" stroke-width="3"/>
+                            <text x="50" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#1a1a1a">Act</text>
+                            <line x1="15" y1="35" x2="85" y2="35" stroke="#666" stroke-width="1"/>
+                            <text x="25" y="50" text-anchor="middle" font-size="10" font-weight="600">TE</text>
+                            <text x="50" y="50" text-anchor="middle" font-size="10" font-weight="600">Dur</text>
+                            <text x="75" y="50" text-anchor="middle" font-size="10" font-weight="600">TF</text>
+                            <line x1="15" y1="60" x2="85" y2="60" stroke="#666" stroke-width="1"/>
+                            <text x="25" y="75" text-anchor="middle" font-size="10" font-weight="600">TI</text>
+                            <text x="50" y="75" text-anchor="middle" font-size="10" font-weight="600">Hol</text>
+                            <text x="75" y="75" text-anchor="middle" font-size="10" font-weight="600">TL</text>
+                        </svg>
+                        <div style="flex: 1;">
+                            <p style="font-weight: bold; margin: 0 0 5px 0; color: #1976d2;">Nodo Normal</p>
+                            <p style="font-size: 11px; margin: 2px 0;"><b>TE:</b> Tiempo temprano inicio</p>
+                            <p style="font-size: 11px; margin: 2px 0;"><b>TF:</b> Tiempo temprano fin</p>
+                            <p style="font-size: 11px; margin: 2px 0;"><b>TI:</b> Tiempo tardío inicio</p>
+                            <p style="font-size: 11px; margin: 2px 0;"><b>TL:</b> Tiempo tardío fin</p>
+                            <p style="font-size: 11px; margin: 2px 0;"><b>Dur:</b> Duración</p>
+                            <p style="font-size: 11px; margin: 2px 0;"><b>Hol:</b> Holgura</p>
+                        </div>
                     </div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <svg width="120" height="120" viewBox="0 0 120 120">
-                        <circle cx="60" cy="60" r="58" fill="#ffebee" stroke="#d32f2f" stroke-width="5"/>
-                        <text x="60" y="25" text-anchor="middle" font-size="16" font-weight="bold" fill="#d32f2f">B</text>
-                        <line x1="20" y1="45" x2="100" y2="45" stroke="#d32f2f" stroke-width="1"/>
-                        <text x="30" y="60" text-anchor="middle" font-size="11" font-weight="600" fill="#d32f2f">TE</text>
-                        <text x="60" y="60" text-anchor="middle" font-size="11" font-weight="600" fill="#d32f2f">Dur</text>
-                        <text x="90" y="60" text-anchor="middle" font-size="11" font-weight="600" fill="#d32f2f">TF</text>
-                        <text x="30" y="85" text-anchor="middle" font-size="11" font-weight="600" fill="#d32f2f">TI</text>
-                        <text x="60" y="85" text-anchor="middle" font-size="11" font-weight="600" fill="#d32f2f">0</text>
-                        <text x="90" y="85" text-anchor="middle" font-size="11" font-weight="600" fill="#d32f2f">TL</text>
-                    </svg>
-                    <div>
-                        <p><strong style="color: #d32f2f;">Nodo Crítico</strong></p>
-                        <p style="font-size: 12px; margin: 5px 0; color: #d32f2f;">• Holgura = 0</p>
-                        <p style="font-size: 12px; margin: 5px 0; color: #d32f2f;">• Parte de la ruta crítica</p>
-                        <p style="font-size: 12px; margin: 5px 0; color: #d32f2f;">• Borde más grueso</p>
-                        <p style="font-size: 12px; margin: 5px 0; color: #d32f2f;">• Color rojo</p>
+                    
+                    <!-- Nodo Crítico -->
+                    <div style="display: flex; align-items: center; gap: 15px; padding: 10px; background: #ffebee; border-radius: 8px;">
+                        <svg width="100" height="100" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="48" fill="#ffebee" stroke="#d32f2f" stroke-width="4"/>
+                            <text x="50" y="20" text-anchor="middle" font-size="14" font-weight="bold" fill="#d32f2f">Act</text>
+                            <line x1="15" y1="35" x2="85" y2="35" stroke="#d32f2f" stroke-width="1"/>
+                            <text x="25" y="50" text-anchor="middle" font-size="10" font-weight="600" fill="#d32f2f">TE</text>
+                            <text x="50" y="50" text-anchor="middle" font-size="10" font-weight="600" fill="#d32f2f">Dur</text>
+                            <text x="75" y="50" text-anchor="middle" font-size="10" font-weight="600" fill="#d32f2f">TF</text>
+                            <line x1="15" y1="60" x2="85" y2="60" stroke="#d32f2f" stroke-width="1"/>
+                            <text x="25" y="75" text-anchor="middle" font-size="10" font-weight="600" fill="#d32f2f">TI</text>
+                            <text x="50" y="75" text-anchor="middle" font-size="10" font-weight="600" fill="#d32f2f">0</text>
+                            <text x="75" y="75" text-anchor="middle" font-size="10" font-weight="600" fill="#d32f2f">TL</text>
+                        </svg>
+                        <div style="flex: 1;">
+                            <p style="font-weight: bold; margin: 0 0 5px 0; color: #d32f2f;">Nodo Crítico</p>
+                            <p style="font-size: 11px; margin: 2px 0; color: #d32f2f;"><b>Holgura = 0</b></p>
+                            <p style="font-size: 11px; margin: 2px 0;">Parte de la ruta crítica</p>
+                            <p style="font-size: 11px; margin: 2px 0;">Sin margen de retraso</p>
+                        </div>
                     </div>
-                </div>
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <svg width="120" height="120" viewBox="0 0 120 120">
-                        <circle cx="60" cy="60" r="58" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="4"/>
-                        <text x="60" y="25" text-anchor="middle" font-size="14" font-weight="bold" fill="#7b1fa2">INICIO</text>
-                        <line x1="20" y1="45" x2="100" y2="45" stroke="#7b1fa2" stroke-width="1"/>
-                        <text x="60" y="60" text-anchor="middle" font-size="11" font-weight="600" fill="#7b1fa2">0</text>
-                        <text x="60" y="85" text-anchor="middle" font-size="11" font-weight="600" fill="#7b1fa2">0</text>
-                    </svg>
-                    <div>
-                        <p><strong style="color: #7b1fa2;">Nodos INICIO/FIN</strong></p>
-                        <p style="font-size: 12px; margin: 5px 0; color: #7b1fa2;">• Duración = 0</p>
-                        <p style="font-size: 12px; margin: 5px 0; color: #7b1fa2;">• No movibles</p>
-                        <p style="font-size: 12px; margin: 5px 0; color: #7b1fa2;">• Color morado</p>
+                    
+                    <!-- Nodos Especiales -->
+                    <div style="display: flex; align-items: center; gap: 15px; padding: 10px; background: #f3e5f5; border-radius: 8px;">
+                        <svg width="100" height="100" viewBox="0 0 100 100">
+                            <circle cx="50" cy="50" r="48" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="3"/>
+                            <text x="50" y="40" text-anchor="middle" font-size="12" font-weight="bold" fill="#7b1fa2">INICIO</text>
+                            <text x="50" y="60" text-anchor="middle" font-size="12" font-weight="bold" fill="#7b1fa2">FIN</text>
+                        </svg>
+                        <div style="flex: 1;">
+                            <p style="font-weight: bold; margin: 0 0 5px 0; color: #7b1fa2;">Nodos INICIO/FIN</p>
+                            <p style="font-size: 11px; margin: 2px 0;">Duración = 0</p>
+                            <p style="font-size: 11px; margin: 2px 0;">Marcan límites del proyecto</p>
+                            <p style="font-size: 11px; margin: 2px 0;">No movibles</p>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     `;
-    return legendSvg;
+    
+    // Agregar el HTML al body en lugar del contenedor del diagrama
+    const existingLegend = document.getElementById('legendContainer');
+    if (existingLegend) {
+        existingLegend.remove();
+    }
+    
+    document.body.insertAdjacentHTML('beforeend', legendHtml);
+    
+    // Agregar funcionalidad de colapsar/expandir
+    const toggleBtn = document.getElementById('legendToggle');
+    const content = document.getElementById('legendContent');
+    const icon = document.getElementById('toggleIcon');
+    
+    toggleBtn.addEventListener('click', () => {
+        if (content.style.display === 'none') {
+            content.style.display = 'block';
+            icon.textContent = '▼';
+        } else {
+            content.style.display = 'none';
+            icon.textContent = '▶';
+        }
+    });
+    
+    return ''; // Retornar string vacío porque ya no va dentro del diagrama
 }
 
 function createNode(activity, activityData, x, y, isStartEnd = false) {
@@ -564,7 +604,12 @@ function generateDiagram() {
     
     // Limpiar y crear contenedor del diagrama con leyenda
     const container = document.getElementById('diagramContainer');
-    container.innerHTML = createLegend() + '<svg id="arrowsSvg" style="position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none;"></svg>';
+
+    // Crear leyenda (ahora se agrega al body)
+    createLegend();
+
+    // Limpiar contenedor del diagrama
+    container.innerHTML = '<svg id="arrowsSvg" style="position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none;"></svg>';  
     container.style.display = 'block';
     
     // Crear nodos con posicionamiento automático
@@ -674,6 +719,9 @@ function displayResultsTable(activityMap) {
     activities.forEach(activity => {
         const data = activityMap[activity.name];
         const row = document.createElement('tr');
+        if (data.isCritical) {
+            row.style.backgroundColor = '#ffebee';
+        }
         row.innerHTML = `
             <td>${activity.name}</td>
             <td>${activity.duration}</td>
@@ -682,7 +730,7 @@ function displayResultsTable(activityMap) {
             <td>${data.tf}</td>
             <td>${data.tl}</td>
             <td>${data.ti}</td>
-            <td>${data.slack}</td>
+            <td>${data.slack.toFixed(2)}</td>
             <td style="color: ${data.isCritical ? '#d32f2f' : '#666'}; font-weight: ${data.isCritical ? 'bold' : 'normal'}">
                 ${data.isCritical ? 'SÍ' : 'NO'}
             </td>
@@ -690,7 +738,91 @@ function displayResultsTable(activityMap) {
         tbody.appendChild(row);
     });
     
-    document.getElementById('resultsSection').style.display = 'block';
+    const resultsSection = document.getElementById('resultsSection');
+    
+    // Verificar si ya existe la tabla PERT y eliminarla si es así
+    const existingPertTable = document.getElementById('pertTableContainer');
+    if (existingPertTable) {
+        existingPertTable.remove();
+    }
+    
+    const existingStats = document.getElementById('projectStats');
+    if (existingStats) {
+        existingStats.remove();
+    }
+    
+    // Crear tabla PERT adicional
+    const pertTableHtml = `
+        <div id="pertTableContainer" style="margin-top: 30px;">
+            <h3>Tabla de Tiempos PERT</h3>
+            <div class="table-container">
+                <table id="pertTable">
+                    <thead>
+                        <tr>
+                            <th>Actividad</th>
+                            <th>To (Optimista)</th>
+                            <th>Tm (Más Probable)</th>
+                            <th>Tp (Pesimista)</th>
+                            <th>Te (Esperado)</th>
+                            <th>σ (Desv. Estándar)</th>
+                            <th>σ² (Varianza)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pertTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
+
+    resultsSection.insertAdjacentHTML('beforeend', pertTableHtml);
+
+    // Llenar tabla PERT
+    const pertBody = document.getElementById('pertTableBody');
+    activities.forEach(activity => {
+        const act = activityMap[activity.name];
+        const row = document.createElement('tr');
+        if (act.isCritical) {
+            row.style.backgroundColor = '#ffebee';
+            row.style.fontWeight = 'bold';
+        }
+        
+        row.innerHTML = `
+            <td>${activity.name}</td>
+            <td>${act.to}</td>
+            <td>${act.tm}</td>
+            <td>${act.tp}</td>
+            <td>${act.te}</td>
+            <td>${act.sigma.toFixed(3)}</td>
+            <td>${act.variance.toFixed(3)}</td>
+        `;
+        
+        pertBody.appendChild(row);
+    });
+
+    // Calcular y mostrar estadísticas del proyecto
+    const criticalActivities = activities.filter(act => activityMap[act.name].isCritical);
+    const projectVariance = criticalActivities.reduce((sum, act) => sum + activityMap[act.name].variance, 0);
+    const projectSigma = Math.sqrt(projectVariance);
+    const projectDuration = Math.max(...activities.map(a => activityMap[a.name].tf));
+
+    const statsHtml = `
+        <div id="projectStats" style="margin-top: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px; border: 2px solid #1976d2;">
+            <h4 style="margin-bottom: 10px; color: #1565c0;">Estadísticas del Proyecto</h4>
+            <p><strong>Varianza total del proyecto (ruta crítica):</strong> ${projectVariance.toFixed(3)}</p>
+            <p><strong>Desviación estándar del proyecto:</strong> ${projectSigma.toFixed(3)}</p>
+            <p><strong>Rango de duración esperada:</strong></p>
+            <ul>
+                <li>68% de probabilidad: ${(projectDuration - projectSigma).toFixed(1)} - ${(projectDuration + projectSigma).toFixed(1)} días</li>
+                <li>95% de probabilidad: ${(projectDuration - 2*projectSigma).toFixed(1)} - ${(projectDuration + 2*projectSigma).toFixed(1)} días</li>
+                <li>99.7% de probabilidad: ${(projectDuration - 3*projectSigma).toFixed(1)} - ${(projectDuration + 3*projectSigma).toFixed(1)} días</li>
+            </ul>
+        </div>
+    `;
+
+    resultsSection.insertAdjacentHTML('beforeend', statsHtml);
+    
+    resultsSection.style.display = 'block';
 }
 
 window.addEventListener('load', function() {
@@ -701,3 +833,143 @@ window.addEventListener('load', function() {
         });
     });
 });
+
+
+// Función para manejar la carga de archivos
+function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const fileName = file.name.toLowerCase();
+    
+    if (fileName.endsWith('.csv')) {
+        handleCSVFile(file);
+    } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+        handleExcelFile(file);
+    } else {
+        alert('Por favor, selecciona un archivo CSV o Excel (.xlsx, .xls)');
+    }
+    
+    // Limpiar el input para permitir cargar el mismo archivo de nuevo
+    event.target.value = '';
+}
+
+// Manejar archivos CSV
+function handleCSVFile(file) {
+    Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+            processImportedData(results.data);
+        },
+        error: function(error) {
+            alert('Error al leer el archivo CSV: ' + error.message);
+        }
+    });
+}
+
+// Manejar archivos Excel
+function handleExcelFile(file) {
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            
+            // Tomar la primera hoja
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            
+            // Convertir a JSON
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            
+            // Procesar datos
+            if (jsonData.length > 0) {
+                const headers = jsonData[0];
+                const dataRows = jsonData.slice(1).filter(row => row.length > 0);
+                
+                const formattedData = dataRows.map(row => {
+                    const obj = {};
+                    headers.forEach((header, index) => {
+                        obj[header] = row[index] || '';
+                    });
+                    return obj;
+                });
+                
+                processImportedData(formattedData);
+            }
+        } catch (error) {
+            alert('Error al leer el archivo Excel: ' + error.message);
+        }
+    };
+    
+    reader.readAsArrayBuffer(file);
+}
+
+// Procesar los datos importados
+function processImportedData(data) {
+    if (!data || data.length === 0) {
+        alert('El archivo está vacío o no contiene datos válidos.');
+        return;
+    }
+    
+    // Verificar que existan las columnas necesarias
+    const firstRow = data[0];
+    const requiredColumns = ['Actividad', 'Duración', 'Predecesoras'];
+    
+    // Intentar encontrar las columnas con diferentes variaciones
+    const columnMapping = {};
+    requiredColumns.forEach(col => {
+        const variations = [
+            col,
+            col.toLowerCase(),
+            col.toUpperCase(),
+            col.replace('ó', 'o'),
+            'Duracion',
+            'Duration'
+        ];
+        
+        for (let key in firstRow) {
+            if (variations.some(v => key.includes(v))) {
+                columnMapping[col] = key;
+                break;
+            }
+        }
+    });
+    
+    // Verificar que se encontraron todas las columnas
+    const missingColumns = requiredColumns.filter(col => !columnMapping[col]);
+    if (missingColumns.length > 0) {
+        alert('El archivo no contiene las columnas requeridas: ' + missingColumns.join(', '));
+        return;
+    }
+    
+    // Limpiar la tabla actual
+    const tbody = document.querySelector('#activitiesTable tbody');
+    tbody.innerHTML = '';
+    
+    // Agregar los datos a la tabla
+    data.forEach((row, index) => {
+        const actividad = row[columnMapping['Actividad']] || '';
+        const duracion = row[columnMapping['Duración']] || '';
+        const predecesoras = row[columnMapping['Predecesoras']] || '';
+        
+        // Solo agregar filas con actividad no vacía
+        if (actividad.trim()) {
+            const newRow = document.createElement('tr');
+            newRow.innerHTML = `
+                <td><input type="text" class="activity-name" value="${actividad}"></td>
+                <td><input type="number" class="activity-duration" value="${duracion}"></td>
+                <td><input type="text" class="activity-predecessors" value="${predecesoras}"></td>
+                <td><button class="btn btn-danger" onclick="removeRow(this)">X</button></td>
+            `;
+            tbody.appendChild(newRow);
+        }
+    });
+    
+    // Mostrar mensaje de éxito
+    const rowCount = tbody.children.length;
+    alert(`Se importaron exitosamente ${rowCount} actividades del archivo.`);
+}
+
