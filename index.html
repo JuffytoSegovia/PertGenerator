@@ -68,6 +68,8 @@
                     <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">📁 Cargar Excel/CSV</button>
                     <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" style="display: none;" onchange="handleFileUpload(event)">
                     <button class="btn btn-primary" onclick="generateDiagram()">Generar diagrama</button>
+                    <button class="btn" style="background: #28a745; color: white;" onclick="autoAdjustNodes()">📐 Autoajustar nodos</button>
+                    <button class="btn" style="background: #17a2b8; color: white;" onclick="showDownloadOptions()">📥 Descargar diagrama</button>
                     <button class="btn" style="background: #ffc107; color: #000;" onclick="clearAll()">Limpiar</button>
                     <button class="btn" style="background: #ff6b6b; color: white;" onclick="removeAllRows()">Eliminar
                         todo</button>
@@ -111,9 +113,24 @@
         </div>
     </div>
 
+    <!-- Modal para opciones de descarga -->
+    <div id="downloadModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); min-width: 300px;">
+            <h3 style="margin-bottom: 20px; text-align: center; color: #333;">Descargar Diagrama PERT</h3>
+            <div style="display: flex; flex-direction: column; gap: 15px;">
+                <button class="btn btn-primary" onclick="downloadDiagram('png')" style="width: 100%;">📷 Descargar como PNG</button>
+                <button class="btn btn-primary" onclick="downloadDiagram('pdf')" style="width: 100%;">📄 Descargar como PDF</button>
+                <button class="btn" style="background: #6c757d; color: white; width: 100%;" onclick="closeDownloadModal()">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Librerías para importación de archivos -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Librerías para captura y exportación -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
     <script src="script.js"></script>
 </body>

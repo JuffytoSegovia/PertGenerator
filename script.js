@@ -438,7 +438,9 @@ function startDrag(e) {
     draggedNode = e.currentTarget;
     const rect = draggedNode.getBoundingClientRect();
     const containerRect = document.getElementById('diagramContainer').getBoundingClientRect();
+    const container = document.getElementById('diagramContainer');
     
+    // Considerar el scroll del contenedor
     dragOffset.x = e.clientX - rect.left;
     dragOffset.y = e.clientY - rect.top;
     
@@ -452,15 +454,23 @@ function startDrag(e) {
 function drag(e) {
     if (!draggedNode) return;
     
-    const containerRect = document.getElementById('diagramContainer').getBoundingClientRect();
-    const x = e.clientX - containerRect.left - dragOffset.x;
-    const y = e.clientY - containerRect.top - dragOffset.y;
+    const container = document.getElementById('diagramContainer');
+    const containerRect = container.getBoundingClientRect();
     
-    const maxX = containerRect.width - 120;
-    const maxY = containerRect.height - 120;
+    // Calcular posición considerando el scroll del contenedor
+    const x = e.clientX - containerRect.left - dragOffset.x + container.scrollLeft;
+    const y = e.clientY - containerRect.top - dragOffset.y + container.scrollTop;
     
-    draggedNode.style.left = Math.max(0, Math.min(x, maxX)) + 'px';
-    draggedNode.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
+    // Límites considerando el área total scrolleable
+    const maxX = container.scrollWidth - 120;
+    const maxY = container.scrollHeight - 120;
+    
+    // Asegurar que el nodo no se salga de los límites
+    const finalX = Math.max(0, Math.min(x, maxX));
+    const finalY = Math.max(0, Math.min(y, maxY));
+    
+    draggedNode.style.left = finalX + 'px';
+    draggedNode.style.top = finalY + 'px';
     
     updateArrows();
 }
@@ -496,7 +506,7 @@ function drawArrow(fromNode, toNode, isCritical = false) {
     line.setAttribute('x2', endX);
     line.setAttribute('y2', endY);
     line.setAttribute('stroke', isCritical ? '#d32f2f' : '#333');
-    line.setAttribute('stroke-width', isCritical ? '4' : '2');
+    line.setAttribute('stroke-width', '2');
     line.setAttribute('marker-end', isCritical ? 'url(#arrowhead-critical)' : 'url(#arrowhead)');
     
     svg.appendChild(line);
@@ -506,8 +516,9 @@ function updateArrows() {
     const svg = document.getElementById('arrowsSvg');
     const container = document.getElementById('diagramContainer');
     
-    svg.style.width = container.scrollWidth + 'px';
-    svg.style.height = container.scrollHeight + 'px';
+    // Asegurar que el SVG cubra toda el área scrolleable
+    svg.style.width = Math.max(container.scrollWidth, container.clientWidth) + 'px';
+    svg.style.height = Math.max(container.scrollHeight, container.clientHeight) + 'px';
     
     svg.innerHTML = `
         <defs>
@@ -515,9 +526,9 @@ function updateArrows() {
                     refX="9" refY="3.5" orient="auto">
                 <polygon points="0 0, 10 3.5, 0 7" fill="#333" />
             </marker>
-            <marker id="arrowhead-critical" markerWidth="12" markerHeight="8" 
-                    refX="10" refY="4" orient="auto">
-                <polygon points="0 0, 12 4, 0 8" fill="#d32f2f" />
+            <marker id="arrowhead-critical" markerWidth="10" markerHeight="7" 
+                    refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#d32f2f" />
             </marker>
         </defs>
     `;
@@ -608,27 +619,61 @@ function generateDiagram() {
     // Crear leyenda (ahora se agrega al body)
     createLegend();
 
-    // Limpiar contenedor del diagrama
+    // Limpiar contenedor del diagrama y configurar SVG
     container.innerHTML = '<svg id="arrowsSvg" style="position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none;"></svg>';  
     container.style.display = 'block';
     
-    // Crear nodos con posicionamiento automático
+    // Calcular dimensiones necesarias para el contenedor
     const positions = calculateNodePositions(projectDuration);
+    
+    // Encontrar las dimensiones máximas necesarias
+    let maxX = 0;
+    let maxY = 0;
+    
+    Object.values(positions).forEach(pos => {
+        maxX = Math.max(maxX, pos.x + 150);
+        maxY = Math.max(maxY, pos.y + 150 + 120);
+    });
+    
+    // Configurar dimensiones del contenedor para scroll adecuado
+    const containerWidth = Math.max(maxX + 200, 1200); // Mínimo 1200px de ancho
+    const containerHeight = Math.max(maxY + 200, 800);  // Mínimo 800px de alto
+    
+    // Configurar el contenedor sin restricciones de altura máxima
+    container.style.width = '100%';
+    container.style.height = 'auto';
+    container.style.minHeight = '600px';
+    container.style.overflowX = 'auto';
+    container.style.overflowY = 'auto';
+    
+    // Crear un div interno que contenga todo el diagrama con las dimensiones reales
+    const innerContent = document.createElement('div');
+    innerContent.style.position = 'relative';
+    innerContent.style.width = containerWidth + 'px';
+    innerContent.style.height = containerHeight + 'px';
+    innerContent.style.minWidth = containerWidth + 'px';
+    innerContent.style.minHeight = containerHeight + 'px';
+    
+    // Mover el SVG al contenedor interno
+    const svg = container.querySelector('#arrowsSvg');
+    container.removeChild(svg);
+    innerContent.appendChild(svg);
+    container.appendChild(innerContent);
     
     // Crear nodo INICIO
     const startNode = createNode('INICIO', nodes['INICIO'], positions['INICIO'].x, positions['INICIO'].y + 150, true);
-    container.appendChild(startNode);
+    innerContent.appendChild(startNode);
     
     // Crear nodos de actividades
     activities.forEach((activity) => {
         const pos = positions[activity.name];
         const node = createNode(activity.name, activityMap[activity.name], pos.x, pos.y + 150);
-        container.appendChild(node);
+        innerContent.appendChild(node);
     });
     
     // Crear nodo FIN
     const endNode = createNode('FIN', nodes['FIN'], positions['FIN'].x, positions['FIN'].y + 150, true);
-    container.appendChild(endNode);
+    innerContent.appendChild(endNode);
     
     // Dibujar flechas después de que los nodos estén en el DOM
     setTimeout(() => {
@@ -689,9 +734,9 @@ function calculateNodePositions(projectDuration) {
     });
     
     const levelPositions = {};
+    const minVerticalSpacing = 180;
     
-    positions['INICIO'] = { x: 50, y: 200 };
-    
+    // Calcular posiciones de actividades con mejor distribución vertical
     Object.keys(levels).forEach(activityName => {
         if (activityName === 'INICIO' || activityName === 'FIN') return;
         
@@ -700,14 +745,56 @@ function calculateNodePositions(projectDuration) {
             levelPositions[level] = 0;
         }
         
-        const x = 50 + level * 200;
-        const y = 50 + (levelPositions[level] * 180) + (300 - levelCounts[level] * 180) / 2;
+        const x = 50 + level * 250; // Aumentar espaciado horizontal
+        
+        // Mejorar el cálculo de Y para evitar superposiciones
+        const nodesInLevel = levelCounts[level];
+        const totalHeight = Math.max(500, (nodesInLevel - 1) * minVerticalSpacing);
+        const startY = 50 + (700 - totalHeight) / 2; // Ajustar para mayor altura
+        const y = startY + levelPositions[level] * minVerticalSpacing;
         
         positions[activityName] = { x, y };
         levelPositions[level]++;
     });
     
-    positions['FIN'] = { x: 50 + (maxLevel + 1) * 200, y: 200 };
+    // Separar nodos críticos y no críticos en el mismo nivel
+    Object.keys(levelCounts).forEach(level => {
+        level = parseInt(level);
+        if (level === 0 || level === maxLevel + 1) return;
+        
+        const activitiesInLevel = activities.filter(act => levels[act.name] === level);
+        if (activitiesInLevel.length <= 1) return;
+        
+        const criticalInLevel = activitiesInLevel.filter(act => nodes[act.name]?.isCritical);
+        const nonCriticalInLevel = activitiesInLevel.filter(act => !nodes[act.name]?.isCritical);
+        
+        if (criticalInLevel.length > 0 && nonCriticalInLevel.length > 0) {
+            const totalNodes = activitiesInLevel.length;
+            const totalHeight = Math.max(500, (totalNodes - 1) * minVerticalSpacing);
+            const startY = 50 + (700 - totalHeight) / 2;
+            
+            criticalInLevel.forEach((activity, index) => {
+                positions[activity.name].y = startY + index * minVerticalSpacing;
+            });
+            
+            nonCriticalInLevel.forEach((activity, index) => {
+                positions[activity.name].y = startY + (criticalInLevel.length + index) * minVerticalSpacing;
+            });
+        }
+    });
+    
+    // Calcular Y promedio de actividades críticas para alinear INICIO y FIN
+    const criticalActivities = activities.filter(act => nodes[act.name]?.isCritical);
+    let avgCriticalY = 350; // valor por defecto centrado
+    
+    if (criticalActivities.length > 0) {
+        const criticalYPositions = criticalActivities.map(act => positions[act.name].y);
+        avgCriticalY = criticalYPositions.reduce((sum, y) => sum + y, 0) / criticalYPositions.length;
+    }
+    
+    // Posicionar INICIO y FIN alineados con la ruta crítica
+    positions['INICIO'] = { x: 50, y: avgCriticalY };
+    positions['FIN'] = { x: 50 + (maxLevel + 1) * 250, y: avgCriticalY };
     
     return positions;
 }
@@ -972,4 +1059,756 @@ function processImportedData(data) {
     const rowCount = tbody.children.length;
     alert(`Se importaron exitosamente ${rowCount} actividades del archivo.`);
 }
+
+// Función para autoajustar nodos de manera más compacta
+function autoAdjustNodes() {
+    const container = document.getElementById('diagramContainer');
+    const innerContent = container.querySelector('div');
+    
+    if (!container || !innerContent || activities.length === 0) {
+        alert('Primero genera el diagrama PERT');
+        return;
+    }
+
+    // Recalcular posiciones con espaciado más compacto
+    const compactPositions = calculateCompactNodePositions();
+    
+    // Aplicar las nuevas posiciones a los nodos existentes
+    Object.keys(compactPositions).forEach(nodeId => {
+        const node = document.getElementById(`node-${nodeId}`);
+        if (node) {
+            const pos = compactPositions[nodeId];
+            node.style.left = pos.x + 'px';
+            node.style.top = pos.y + 'px';
+        }
+    });
+
+    // Ajustar el tamaño del contenedor interno a las nuevas dimensiones
+    let maxX = 0;
+    let maxY = 0;
+    
+    Object.values(compactPositions).forEach(pos => {
+        maxX = Math.max(maxX, pos.x + 120);
+        maxY = Math.max(maxY, pos.y + 120);
+    });
+    
+    // Ajustar dimensiones del contenedor interno
+    const newWidth = maxX + 200;
+    const newHeight = maxY + 200;
+    
+    innerContent.style.width = newWidth + 'px';
+    innerContent.style.height = newHeight + 'px';
+    innerContent.style.minWidth = newWidth + 'px';
+    innerContent.style.minHeight = newHeight + 'px';
+    
+    // Actualizar flechas después del reposicionamiento
+    setTimeout(() => {
+        updateArrows();
+    }, 100);
+}
+
+// Función para calcular posiciones más compactas
+function calculateCompactNodePositions() {
+    const positions = {};
+    const levels = {};
+    
+    // Calcular niveles (igual que antes)
+    activities.forEach(activity => {
+        if (activity.predecessors.length === 0) {
+            levels[activity.name] = 1;
+        }
+    });
+    
+    let maxLevel = 1;
+    let changed = true;
+    while (changed) {
+        changed = false;
+        activities.forEach(activity => {
+            if (levels[activity.name] === undefined) {
+                let maxPredLevel = 0;
+                let allPredsHaveLevel = true;
+                
+                activity.predecessors.forEach(pred => {
+                    if (levels[pred] === undefined) {
+                        allPredsHaveLevel = false;
+                    } else {
+                        maxPredLevel = Math.max(maxPredLevel, levels[pred]);
+                    }
+                });
+                
+                if (allPredsHaveLevel && maxPredLevel >= 0) {
+                    levels[activity.name] = maxPredLevel + 1;
+                    maxLevel = Math.max(maxLevel, levels[activity.name]);
+                    changed = true;
+                }
+            }
+        });
+    }
+    
+    levels['INICIO'] = 0;
+    levels['FIN'] = maxLevel + 1;
+    
+    const levelCounts = {};
+    Object.values(levels).forEach(level => {
+        levelCounts[level] = (levelCounts[level] || 0) + 1;
+    });
+    
+    const levelPositions = {};
+    const compactVerticalSpacing = 140; // Espaciado vertical más compacto
+    const compactHorizontalSpacing = 180; // Espaciado horizontal más compacto
+    
+    // Calcular posiciones compactas
+    Object.keys(levels).forEach(activityName => {
+        if (activityName === 'INICIO' || activityName === 'FIN') return;
+        
+        const level = levels[activityName];
+        if (!levelPositions[level]) {
+            levelPositions[level] = 0;
+        }
+        
+        const x = 50 + level * compactHorizontalSpacing;
+        
+        // Distribución vertical más compacta
+        const nodesInLevel = levelCounts[level];
+        const totalHeight = Math.max(200, (nodesInLevel - 1) * compactVerticalSpacing);
+        const startY = 50 + Math.max(0, (400 - totalHeight) / 2);
+        const y = startY + levelPositions[level] * compactVerticalSpacing;
+        
+        positions[activityName] = { x, y };
+        levelPositions[level]++;
+    });
+    
+    // Separar nodos críticos y no críticos con espaciado compacto
+    Object.keys(levelCounts).forEach(level => {
+        level = parseInt(level);
+        if (level === 0 || level === maxLevel + 1) return;
+        
+        const activitiesInLevel = activities.filter(act => levels[act.name] === level);
+        if (activitiesInLevel.length <= 1) return;
+        
+        const criticalInLevel = activitiesInLevel.filter(act => nodes[act.name]?.isCritical);
+        const nonCriticalInLevel = activitiesInLevel.filter(act => !nodes[act.name]?.isCritical);
+        
+        if (criticalInLevel.length > 0 && nonCriticalInLevel.length > 0) {
+            const totalNodes = activitiesInLevel.length;
+            const totalHeight = Math.max(200, (totalNodes - 1) * compactVerticalSpacing);
+            const startY = 50 + Math.max(0, (400 - totalHeight) / 2);
+            
+            criticalInLevel.forEach((activity, index) => {
+                positions[activity.name].y = startY + index * compactVerticalSpacing;
+            });
+            
+            nonCriticalInLevel.forEach((activity, index) => {
+                positions[activity.name].y = startY + (criticalInLevel.length + index) * compactVerticalSpacing;
+            });
+        }
+    });
+    
+    // Calcular Y promedio de actividades críticas para INICIO y FIN
+    const criticalActivities = activities.filter(act => nodes[act.name]?.isCritical);
+    let avgCriticalY = 250; // valor por defecto
+    
+    if (criticalActivities.length > 0) {
+        const criticalYPositions = criticalActivities.map(act => positions[act.name].y);
+        avgCriticalY = criticalYPositions.reduce((sum, y) => sum + y, 0) / criticalYPositions.length;
+    }
+    
+    // Posicionar INICIO y FIN
+    positions['INICIO'] = { x: 50, y: avgCriticalY };
+    positions['FIN'] = { x: 50 + (maxLevel + 1) * compactHorizontalSpacing, y: avgCriticalY };
+    
+    return positions;
+}
+
+// Funciones mejoradas para manejo de descarga
+function showDownloadOptions() {
+    const container = document.getElementById('diagramContainer');
+    if (!container || container.style.display === 'none' || activities.length === 0) {
+        alert('Primero genera el diagrama PERT para poder descargarlo');
+        return;
+    }
+    
+    document.getElementById('downloadModal').style.display = 'block';
+}
+
+function closeDownloadModal() {
+    document.getElementById('downloadModal').style.display = 'none';
+}
+
+function downloadDiagram(format) {
+    const container = document.getElementById('diagramContainer');
+    const innerContent = container.querySelector('div');
+    
+    if (!container || !innerContent) {
+        alert('No hay diagrama para descargar');
+        return;
+    }
+
+    // Ocultar temporalmente la leyenda
+    const legend = document.getElementById('legendContainer');
+    const legendWasVisible = legend && legend.style.display !== 'none';
+    if (legend && legendWasVisible) {
+        legend.style.display = 'none';
+    }
+
+    // Mostrar indicador de carga
+    const loadingDiv = createLoadingIndicator();
+    document.body.appendChild(loadingDiv);
+
+    // Usar método directo de canvas en lugar de html2canvas
+    setTimeout(() => {
+        try {
+            createDiagramCanvas(innerContent, format, loadingDiv, legend, legendWasVisible);
+        } catch (error) {
+            console.error('Error en captura directa:', error);
+            tryHtml2Canvas(innerContent, format, loadingDiv, legend, legendWasVisible);
+        }
+    }, 500);
+}
+
+function createLoadingIndicator() {
+    const loadingDiv = document.createElement('div');
+    loadingDiv.innerHTML = `
+        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 15px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); z-index: 3000; text-align: center; max-width: 300px;">
+            <div style="margin-bottom: 20px; font-size: 18px; font-weight: 600; color: #333;">📸 Creando imagen...</div>
+            <div style="margin-bottom: 15px; color: #666;">Procesando diagrama PERT</div>
+            <div style="border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto;"></div>
+        </div>
+        <style>
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+    `;
+    return loadingDiv;
+}
+
+function createDiagramCanvas(innerContent, format, loadingDiv, legend, legendWasVisible) {
+    // Obtener dimensiones del contenido
+    const width = innerContent.offsetWidth;
+    const height = innerContent.offsetHeight;
+    
+    // Crear canvas
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Configurar canvas con alta resolución
+    const scale = 2; // Para mejor calidad
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    ctx.scale(scale, scale);
+    
+    // Fondo
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, width, height);
+    
+    // Obtener todos los nodos
+    const nodes = innerContent.querySelectorAll('.node');
+    
+    // Dibujar conexiones primero (flechas)
+    drawConnectionsOnCanvas(ctx, nodes);
+    
+    // Dibujar nodos encima
+    nodes.forEach(node => {
+        drawDetailedNodeOnCanvas(ctx, node);
+    });
+    
+    // Procesar resultado
+    processCanvasResult(canvas, format, loadingDiv, legend, legendWasVisible);
+}
+
+function drawConnectionsOnCanvas(ctx, nodes) {
+    // Configurar estilo de líneas
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    // Dibujar flechas desde INICIO
+    const startNode = Array.from(nodes).find(node => node.id === 'node-INICIO');
+    if (startNode) {
+        activities.forEach(activity => {
+            if (activity.predecessors.length === 0) {
+                const toNode = Array.from(nodes).find(node => node.id === `node-${activity.name}`);
+                if (toNode) {
+                    const isCritical = nodes[activity.name]?.isCritical;
+                    drawCanvasArrow(ctx, startNode, toNode, isCritical);
+                }
+            }
+        });
+    }
+    
+    // Dibujar flechas entre actividades
+    activities.forEach(activity => {
+        activity.predecessors.forEach(predName => {
+            const fromNode = Array.from(nodes).find(node => node.id === `node-${predName}`);
+            const toNode = Array.from(nodes).find(node => node.id === `node-${activity.name}`);
+            if (fromNode && toNode) {
+                const isCritical = nodes[predName]?.isCritical && nodes[activity.name]?.isCritical;
+                drawCanvasArrow(ctx, fromNode, toNode, isCritical);
+            }
+        });
+    });
+    
+    // Dibujar flechas hacia FIN
+    const endNode = Array.from(nodes).find(node => node.id === 'node-FIN');
+    if (endNode) {
+        activities.forEach(activity => {
+            const hasSuccessors = activities.some(act => act.predecessors.includes(activity.name));
+            if (!hasSuccessors) {
+                const fromNode = Array.from(nodes).find(node => node.id === `node-${activity.name}`);
+                if (fromNode) {
+                    const isCritical = nodes[activity.name]?.isCritical;
+                    drawCanvasArrow(ctx, fromNode, endNode, isCritical);
+                }
+            }
+        });
+    }
+}
+
+function drawCanvasArrow(ctx, fromNode, toNode, isCritical = false) {
+    const fromX = parseInt(fromNode.style.left) + 60;
+    const fromY = parseInt(fromNode.style.top) + 60;
+    const toX = parseInt(toNode.style.left) + 60;
+    const toY = parseInt(toNode.style.top) + 60;
+    
+    // Calcular puntos en el borde de los círculos
+    const angle = Math.atan2(toY - fromY, toX - fromX);
+    const radius = 60;
+    
+    const startX = fromX + Math.cos(angle) * radius;
+    const startY = fromY + Math.sin(angle) * radius;
+    const endX = toX - Math.cos(angle) * radius;
+    const endY = toY - Math.sin(angle) * radius;
+    
+    // Configurar estilo
+    ctx.strokeStyle = isCritical ? '#d32f2f' : '#333333';
+    ctx.lineWidth = 3;
+    
+    // Dibujar línea
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+    
+    // Dibujar punta de flecha
+    const headLength = 12;
+    const headAngle = Math.PI / 6;
+    
+    ctx.fillStyle = isCritical ? '#d32f2f' : '#333333';
+    ctx.beginPath();
+    ctx.moveTo(endX, endY);
+    ctx.lineTo(
+        endX - headLength * Math.cos(angle - headAngle),
+        endY - headLength * Math.sin(angle - headAngle)
+    );
+    ctx.lineTo(
+        endX - headLength * Math.cos(angle + headAngle),
+        endY - headLength * Math.sin(angle + headAngle)
+    );
+    ctx.closePath();
+    ctx.fill();
+}
+
+function drawDetailedNodeOnCanvas(ctx, node) {
+    const x = parseInt(node.style.left);
+    const y = parseInt(node.style.top);
+    const radius = 60;
+    const centerX = x + radius;
+    const centerY = y + radius;
+    
+    // Determinar colores según el tipo de nodo
+    let fillColor = '#e3f2fd';
+    let strokeColor = '#1976d2';
+    let strokeWidth = 4;
+    
+    if (node.classList.contains('critical')) {
+        fillColor = '#ffebee';
+        strokeColor = '#d32f2f';
+        strokeWidth = 5;
+    } else if (node.classList.contains('start-end')) {
+        fillColor = '#f3e5f5';
+        strokeColor = '#7b1fa2';
+    }
+    
+    // Dibujar círculo principal
+    ctx.fillStyle = fillColor;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = strokeWidth;
+    
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius - strokeWidth/2, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.stroke();
+    
+    // Configurar texto
+    ctx.fillStyle = '#000000';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    // Nombre de la actividad
+    const activityName = node.querySelector('.node-activity').textContent;
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText(activityName, centerX, y + 20); // Subir más el nombre
+    
+    // Líneas divisoras
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1;
+    
+    // Línea superior - ajustar posición
+    ctx.beginPath();
+    ctx.moveTo(x + 18, y + 32); // Ajustar para que quede dentro del círculo
+    ctx.lineTo(x + 102, y + 32);
+    ctx.stroke();
+    
+    // Línea inferior - ajustar posición
+    ctx.beginPath();
+    ctx.moveTo(x + 18, y + 88); // Subir para que quede dentro del círculo
+    ctx.lineTo(x + 102, y + 88);
+    ctx.stroke();
+    
+    // Datos del nodo
+    const rows = node.querySelectorAll('.node-row');
+    ctx.font = 'bold 11px Arial'; // Reducir un poco el tamaño
+    
+    if (rows.length >= 2) {
+        // Primera fila: TE, Duración, TF - ajustar posición Y
+        const firstRow = rows[0].querySelectorAll('span');
+        if (firstRow.length >= 3) {
+            ctx.fillText(firstRow[0].textContent, x + 27, y + 50); // TE - subir
+            ctx.fillText(firstRow[1].textContent, x + 60, y + 50); // Duración - subir
+            ctx.fillText(firstRow[2].textContent, x + 93, y + 50); // TF - subir
+        }
+        
+        // Segunda fila: TI, Holgura, TL - ajustar posición Y
+        const secondRow = rows[1].querySelectorAll('span');
+        if (secondRow.length >= 3) {
+            ctx.fillText(secondRow[0].textContent, x + 27, y + 75); // TI - subir considerablemente
+            ctx.fillText(secondRow[1].textContent, x + 60, y + 75); // Holgura - subir considerablemente
+            ctx.fillText(secondRow[2].textContent, x + 93, y + 75); // TL - subir considerablemente
+        }
+    }
+    
+    // Líneas verticales para separar columnas - ajustar posiciones
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 1;
+    
+    // Primera línea vertical
+    ctx.beginPath();
+    ctx.moveTo(x + 43, y + 32); // Ajustar inicio
+    ctx.lineTo(x + 43, y + 88); // Ajustar fin
+    ctx.stroke();
+    
+    // Segunda línea vertical
+    ctx.beginPath();
+    ctx.moveTo(x + 77, y + 32); // Ajustar inicio
+    ctx.lineTo(x + 77, y + 88); // Ajustar fin
+    ctx.stroke();
+}
+
+function processCanvasResult(canvas, format, loadingDiv, legend, legendWasVisible) {
+    try {
+        // Remover indicador de carga
+        if (loadingDiv && loadingDiv.parentNode) {
+            document.body.removeChild(loadingDiv);
+        }
+        
+        // Restaurar leyenda
+        if (legend && legendWasVisible) {
+            legend.style.display = 'block';
+        }
+        
+        if (format === 'png') {
+            downloadCanvasPNG(canvas);
+        } else if (format === 'pdf') {
+            downloadCanvasPDF(canvas);
+        }
+        
+        closeDownloadModal();
+    } catch (error) {
+        console.error('Error al procesar canvas:', error);
+        handleDownloadFailure(loadingDiv, legend, legendWasVisible);
+    }
+}
+
+function downloadCanvasPNG(canvas) {
+    try {
+        const link = document.createElement('a');
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+        link.download = `diagrama-pert-${timestamp}.png`;
+        link.href = canvas.toDataURL('image/png', 1.0);
+        
+        // Forzar descarga
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        console.log('PNG descargado exitosamente');
+    } catch (error) {
+        console.error('Error al descargar PNG:', error);
+        alert('Error al descargar PNG. Intenta con el método alternativo.');
+    }
+}
+
+function downloadCanvasPDF(canvas) {
+    try {
+        const imgData = canvas.toDataURL('image/png', 1.0);
+        const { jsPDF } = window.jspdf;
+        
+        // Dimensiones en mm para PDF
+        const imgWidth = canvas.width / 4; // Reducir escala
+        const imgHeight = canvas.height / 4;
+        
+        // Determinar orientación
+        const isLandscape = imgWidth > imgHeight;
+        
+        const pdf = new jsPDF({
+            orientation: isLandscape ? 'landscape' : 'portrait',
+            unit: 'mm',
+            format: 'a4'
+        });
+        
+        // Calcular dimensiones para ajustar a la página
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const margin = 10;
+        
+        const maxWidth = pageWidth - (margin * 2);
+        const maxHeight = pageHeight - (margin * 2);
+        
+        let finalWidth = imgWidth;
+        let finalHeight = imgHeight;
+        
+        // Escalar si es necesario
+        if (finalWidth > maxWidth) {
+            const ratio = maxWidth / finalWidth;
+            finalWidth = maxWidth;
+            finalHeight = finalHeight * ratio;
+        }
+        
+        if (finalHeight > maxHeight) {
+            const ratio = maxHeight / finalHeight;
+            finalHeight = maxHeight;
+            finalWidth = finalWidth * ratio;
+        }
+        
+        // Centrar imagen
+        const xPos = (pageWidth - finalWidth) / 2;
+        const yPos = (pageHeight - finalHeight) / 2;
+        
+        pdf.addImage(imgData, 'PNG', xPos, yPos, finalWidth, finalHeight);
+        
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+        pdf.save(`diagrama-pert-${timestamp}.pdf`);
+        
+        console.log('PDF descargado exitosamente');
+    } catch (error) {
+        console.error('Error al descargar PDF:', error);
+        alert('Error al descargar PDF. Intenta con el método alternativo.');
+    }
+}
+
+function tryHtml2Canvas(innerContent, format, loadingDiv, legend, legendWasVisible) {
+    // Método de respaldo usando html2canvas
+    const options = {
+        backgroundColor: '#f8fafc',
+        scale: 1,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        width: innerContent.offsetWidth,
+        height: innerContent.offsetHeight,
+        onclone: function(clonedDoc) {
+            // Mejorar elementos clonados
+            const clonedNodes = clonedDoc.querySelectorAll('.node');
+            clonedNodes.forEach(node => {
+                node.style.position = 'absolute';
+                node.style.display = 'flex';
+            });
+        }
+    };
+
+    html2canvas(innerContent, options).then(canvas => {
+        processCanvasResult(canvas, format, loadingDiv, legend, legendWasVisible);
+    }).catch(error => {
+        console.error('html2canvas también falló:', error);
+        handleDownloadFailure(loadingDiv, legend, legendWasVisible);
+    });
+}
+
+function handleDownloadFailure(loadingDiv, legend, legendWasVisible) {
+    // Remover indicador de carga
+    if (loadingDiv && loadingDiv.parentNode) {
+        document.body.removeChild(loadingDiv);
+    }
+    
+    // Restaurar leyenda
+    if (legend && legendWasVisible) {
+        legend.style.display = 'block';
+    }
+    
+    // Mostrar modal con alternativas
+    const alternativeModal = document.createElement('div');
+    alternativeModal.innerHTML = `
+        <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 30px; border-radius: 15px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); z-index: 3000; text-align: center; max-width: 450px;">
+            <h3 style="margin-bottom: 20px; color: #d32f2f;">⚠️ Error de Captura Automática</h3>
+            <p style="margin-bottom: 20px; color: #666; line-height: 1.5;">No se pudo generar automáticamente la imagen. Prueba estas alternativas:</p>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <button onclick="openPrintView()" style="padding: 12px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">🖨️ Abrir vista de impresión optimizada</button>
+                <button onclick="showScreenshotInstructions()" style="padding: 12px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">📸 Ver instrucciones de captura manual</button>
+                <button onclick="exportToSVG()" style="padding: 12px; background: #17a2b8; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">📄 Exportar datos del diagrama</button>
+                <button onclick="closeAlternativeModal()" style="padding: 12px; background: #6c757d; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">Cerrar</button>
+            </div>
+        </div>
+    `;
+    alternativeModal.id = 'alternativeModal';
+    alternativeModal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 2999;';
+    
+    document.body.appendChild(alternativeModal);
+    closeDownloadModal();
+}
+
+function openPrintView() {
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    const diagramContainer = document.getElementById('diagramContainer');
+    
+    printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Diagrama PERT - Vista de Impresión</title>
+            <style>
+                body { 
+                    margin: 0; 
+                    padding: 20px; 
+                    font-family: Arial, sans-serif; 
+                    background: white;
+                }
+                .diagram-container { 
+                    border: 2px solid #ccc !important; 
+                    overflow: visible !important; 
+                    max-height: none !important;
+                    background: #f8fafc !important;
+                    position: relative !important;
+                }
+                .node { 
+                    position: absolute !important;
+                    background: #e3f2fd !important;
+                    border: 4px solid #1976d2 !important;
+                    border-radius: 50% !important;
+                    width: 120px !important;
+                    height: 120px !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                    justify-content: center !important;
+                    align-items: center !important;
+                    font-size: 12px !important;
+                    font-weight: bold !important;
+                    color: #000000 !important;
+                }
+                .node.critical {
+                    background: #ffebee !important;
+                    border-color: #d32f2f !important;
+                }
+                .node.start-end {
+                    background: #f3e5f5 !important;
+                    border-color: #7b1fa2 !important;
+                }
+                @media print {
+                    body { margin: 0; }
+                    .diagram-container { overflow: visible !important; }
+                }
+                .instructions {
+                    background: #e3f2fd;
+                    padding: 15px;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                    border-left: 4px solid #1976d2;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="instructions">
+                <h3>📋 Instrucciones para guardar como imagen:</h3>
+                <p><strong>Opción 1:</strong> Usa Ctrl+P y selecciona "Guardar como PDF"</p>
+                <p><strong>Opción 2:</strong> Haz clic derecho sobre el diagrama → "Guardar imagen como..."</p>
+                <p><strong>Opción 3:</strong> Usa la herramienta de captura de tu navegador o sistema operativo</p>
+            </div>
+            <h1>Diagrama PERT</h1>
+            ${diagramContainer.outerHTML}
+        </body>
+        </html>
+    `);
+    
+    printWindow.document.close();
+    closeAlternativeModal();
+}
+
+function showScreenshotInstructions() {
+    alert(`📸 INSTRUCCIONES PARA CAPTURA MANUAL:
+
+🖥️ Windows:
+• Presiona Windows + Shift + S
+• Selecciona el área del diagrama
+• La imagen se copiará al portapapeles
+
+🍎 Mac:
+• Presiona Cmd + Shift + 4
+• Selecciona el área del diagrama
+• La imagen se guardará en el escritorio
+
+🌐 Navegador:
+• Clic derecho → "Inspeccionar elemento"
+• Encuentra el elemento del diagrama
+• Clic derecho → "Capturar nodo como imagen"
+
+💡 Tip: Usa el botón "Autoajustar nodos" antes de capturar para obtener una imagen más compacta.`);
+    closeAlternativeModal();
+}
+
+function exportToSVG() {
+    try {
+        const container = document.getElementById('diagramContainer');
+        const data = {
+            activities: activities,
+            nodes: nodes,
+            timestamp: new Date().toISOString(),
+            projectInfo: {
+                duration: document.getElementById('projectDuration').textContent,
+                criticalPath: document.getElementById('criticalPathText').textContent
+            }
+        };
+        
+        const jsonString = JSON.stringify(data, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+        link.download = `diagrama-pert-datos-${timestamp}.json`;
+        link.href = url;
+        link.click();
+        
+        URL.revokeObjectURL(url);
+        alert('✅ Datos del diagrama exportados exitosamente en formato JSON');
+    } catch (error) {
+        console.error('Error al exportar datos:', error);
+        alert('❌ Error al exportar los datos del diagrama');
+    }
+    closeAlternativeModal();
+}
+
+function closeAlternativeModal() {
+    const modal = document.getElementById('alternativeModal');
+    if (modal) {
+        document.body.removeChild(modal);
+    }
+}
+
+// Hacer funciones globales
+window.openPrintView = openPrintView;
+window.showScreenshotInstructions = showScreenshotInstructions;
+window.exportToSVG = exportToSVG;
+window.closeAlternativeModal = closeAlternativeModal;
 
