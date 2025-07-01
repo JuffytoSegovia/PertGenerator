@@ -160,7 +160,7 @@ function hasCyclicDependencies() {
 }
 
 function calculatePERT() {
-    console.log('=== INICIANDO CÁLCULO PERT ===');
+    console.log('=== INICIANDO CÁLCULO PERT CORREGIDO ===');
     const activityMap = {};
     
     // Inicializar actividades
@@ -169,7 +169,7 @@ function calculatePERT() {
             ...activity,
             te: 0, // Tiempo temprano de inicio
             tf: 0, // Tiempo temprano de fin
-            tl: -1, // Tiempo tardío de fin (inicializar en -1 para detectar no calculados)
+            tl: 0, // Tiempo tardío de fin
             ti: 0, // Tiempo tardío de inicio
             slack: 0,
             isCritical: false
@@ -180,120 +180,143 @@ function calculatePERT() {
 
     // FORWARD PASS: Calcular TE y TF
     console.log('--- FORWARD PASS ---');
+    
+    // Ordenar actividades topológicamente para el forward pass
+    const sortedActivities = [];
+    const visited = new Set();
+    const tempVisited = new Set();
+    
+    function topologicalSort(activityName) {
+        if (tempVisited.has(activityName)) {
+            throw new Error('Dependencia circular detectada');
+        }
+        if (visited.has(activityName)) {
+            return;
+        }
+        
+        tempVisited.add(activityName);
+        const activity = activities.find(act => act.name === activityName);
+        
+        if (activity) {
+            activity.predecessors.forEach(predName => {
+                topologicalSort(predName);
+            });
+        }
+        
+        tempVisited.delete(activityName);
+        visited.add(activityName);
+        if (activity) {
+            sortedActivities.push(activity);
+        }
+    }
+    
+    // Realizar ordenamiento topológico
+    activities.forEach(activity => {
+        if (!visited.has(activity.name)) {
+            topologicalSort(activity.name);
+        }
+    });
+    
+    // Calcular TE y TF en orden topológico
+    sortedActivities.forEach(activity => {
+        const act = activityMap[activity.name];
+        
+        // Calcular TE: máximo de los TF de todos los predecesores
+        let maxPredFinish = 0;
+        activity.predecessors.forEach(predName => {
+            if (activityMap[predName]) {
+                maxPredFinish = Math.max(maxPredFinish, activityMap[predName].tf);
+            }
+        });
+        
+        act.te = maxPredFinish;
+        act.tf = act.te + activity.duration;
+        
+        console.log(`${activity.name}: TE=${act.te}, TF=${act.tf}`);
+    });
+
+    // Encontrar duración total del proyecto
+    const projectDuration = Math.max(...Object.values(activityMap).map(act => act.tf));
+    console.log('Duración total del proyecto:', projectDuration);
+
+    // BACKWARD PASS: Calcular TL y TI
+    console.log('--- BACKWARD PASS ---');
+    
+    // Inicializar TL para actividades finales
+    Object.keys(activityMap).forEach(actName => {
+        const hasSuccessors = activities.some(act => act.predecessors.includes(actName));
+        if (!hasSuccessors) {
+            // Actividad final
+            activityMap[actName].tl = activityMap[actName].tf;
+            console.log(`${actName} (final): TL=${activityMap[actName].tl}`);
+        }
+    });
+    
+    // Procesar actividades en orden reverso
+    const reverseActivities = [...sortedActivities].reverse();
+    
+    // Iterar hasta que todos los TL estén calculados
     let changed = true;
     let iterations = 0;
     while (changed && iterations < 100) {
         changed = false;
         iterations++;
         
-        activities.forEach(activity => {
+        reverseActivities.forEach(activity => {
             const act = activityMap[activity.name];
-            let maxPredFinish = 0;
             
-            activity.predecessors.forEach(predName => {
-                if (activityMap[predName]) {
-                    maxPredFinish = Math.max(maxPredFinish, activityMap[predName].tf);
+            // Si TL ya está calculado, calcular TI
+            if (act.tl > 0 || act.tf === projectDuration) {
+                if (act.tl === 0 && act.tf === projectDuration) {
+                    act.tl = projectDuration;
                 }
-            });
-            
-            const newTE = maxPredFinish;
-            const newTF = newTE + activity.duration;
-            
-            if (newTE !== act.te || newTF !== act.tf) {
-                act.te = newTE;
-                act.tf = newTF;
-                changed = true;
-                console.log(`${activity.name}: TE=${newTE}, TF=${newTF}`);
+                act.ti = act.tl - activity.duration;
             }
-        });
-    }
-    
-    console.log('Forward pass completado en', iterations, 'iteraciones');
-
-    // Encontrar duración total del proyecto
-    const projectDuration = Math.max(...activities.map(a => activityMap[a.name].tf));
-    console.log('Duración total del proyecto:', projectDuration);
-
-    // BACKWARD PASS: Calcular TL y TI
-    console.log('--- BACKWARD PASS ---');
-    
-    // Inicializar TL para actividades sin sucesoras
-    activities.forEach(activity => {
-        const hasSuccessors = activities.some(act => 
-            act.predecessors.includes(activity.name)
-        );
-        
-        if (!hasSuccessors) {
-            activityMap[activity.name].tl = projectDuration;
-            console.log(`${activity.name} no tiene sucesoras, TL = ${projectDuration}`);
-        }
-    });
-
-    // Calcular TL para las demás actividades
-    changed = true;
-    iterations = 0;
-    while (changed && iterations < 100) {
-        changed = false;
-        iterations++;
-        
-        activities.forEach(activity => {
-            const act = activityMap[activity.name];
             
-            if (act.tl === -1) {
-                const successors = activities.filter(a => 
-                    a.predecessors.includes(activity.name)
-                );
-                
-                if (successors.length > 0) {
-                    const successorTLs = successors.map(s => {
-                        const succAct = activityMap[s.name];
-                        return succAct.tl !== -1 ? succAct.tl - s.duration : Infinity;
-                    });
+            // Calcular TL para predecesores
+            activity.predecessors.forEach(predName => {
+                const predActivity = activityMap[predName];
+                if (predActivity && act.ti >= 0) {
+                    // TL del predecesor = MIN de todos los TI de sus sucesores
+                    const successors = activities.filter(a => a.predecessors.includes(predName));
+                    const minSuccessorTI = Math.min(...successors.map(succ => {
+                        const succAct = activityMap[succ.name];
+                        return succAct.ti >= 0 ? succAct.ti : Infinity;
+                    }).filter(ti => ti !== Infinity));
                     
-                    if (!successorTLs.includes(Infinity)) {
-                        const minTL = Math.min(...successorTLs);
-                        act.tl = minTL;
-                        changed = true;
-                        console.log(`${activity.name}: TL = ${minTL}`);
+                    if (minSuccessorTI !== Infinity) {
+                        const newTL = minSuccessorTI;
+                        if (predActivity.tl !== newTL) {
+                            predActivity.tl = newTL;
+                            predActivity.ti = newTL - predActivity.duration;
+                            changed = true;
+                            console.log(`${predName}: TL=${newTL}, TI=${predActivity.ti}`);
+                        }
                     }
                 }
-            }
+            });
         });
     }
-
+    
     console.log('Backward pass completado en', iterations, 'iteraciones');
 
-    // Calcular TI, Holgura e identificar ruta crítica
-    activities.forEach(activity => {
-        const act = activityMap[activity.name];
-        act.ti = act.tl - activity.duration;
+    // Calcular holguras y determinar ruta crítica
+    console.log('--- CALCULANDO HOLGURAS ---');
+    Object.keys(activityMap).forEach(actName => {
+        const act = activityMap[actName];
         act.slack = act.ti - act.te;
-        act.isCritical = Math.abs(act.slack) < 0.0001;
+        act.isCritical = act.slack === 0;
         
-        console.log(`${activity.name}: TI=${act.ti}, Slack=${act.slack}, Crítica=${act.isCritical}`);
-    });
-
-    // Calcular tiempos PERT (To, Tm, Tp, σ, Varianza)
-    activities.forEach(activity => {
-        const act = activityMap[activity.name];
-        
-        // Cálculos PERT
-        act.to = Math.max(1, activity.duration - 1);  // Tiempo optimista (mínimo 1)
-        act.tm = activity.duration;                    // Tiempo más probable
-        act.tp = activity.duration + 2;                // Tiempo pesimista
-        act.te = activity.duration;                    // Tiempo esperado (ya lo teníamos)
-        
-        // Desviación estándar y varianza
-        act.sigma = (act.tp - act.to) / 6;
-        act.variance = Math.pow(act.sigma, 2);
-        
-        console.log(`${activity.name}: To=${act.to}, Tm=${act.tm}, Tp=${act.tp}, σ=${act.sigma.toFixed(2)}, Var=${act.variance.toFixed(2)}`);
+        console.log(`${actName}: Slack=${act.slack}, Critical=${act.isCritical}`);
     });
 
     console.log('=== CÁLCULO PERT COMPLETADO ===');
     console.log('Resultado final:', activityMap);
 
-    return { activityMap, projectDuration };
+    return {
+        activityMap,
+        projectDuration
+    };
 }
 
 function findCriticalPath(activityMap) {
