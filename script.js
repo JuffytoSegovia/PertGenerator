@@ -172,7 +172,13 @@ function calculatePERT() {
             tl: 0, // Tiempo tardío de fin
             ti: 0, // Tiempo tardío de inicio
             slack: 0,
-            isCritical: false
+            isCritical: false,
+            // Valores PERT adicionales
+            to: 0,       // Tiempo optimista
+            tm: 0,       // Tiempo más probable
+            tp: 0,       // Tiempo pesimista
+            sigma: 0,    // Desviación estándar
+            variance: 0  // Varianza
         };
     });
 
@@ -301,13 +307,24 @@ function calculatePERT() {
     console.log('Backward pass completado en', iterations, 'iteraciones');
 
     // Calcular holguras y determinar ruta crítica
-    console.log('--- CALCULANDO HOLGURAS ---');
+    console.log('--- CALCULANDO HOLGURAS Y VALORES PERT ---');
     Object.keys(activityMap).forEach(actName => {
         const act = activityMap[actName];
         act.slack = act.ti - act.te;
         act.isCritical = act.slack === 0;
         
-        console.log(`${actName}: Slack=${act.slack}, Critical=${act.isCritical}`);
+        // Calcular valores PERT
+        const duration = activities.find(a => a.name === actName).duration;
+        act.to = Math.max(1, duration - 1);    // Tiempo optimista (mínimo 1)
+        act.tm = duration;                     // Tiempo más probable
+        act.tp = duration + 2;                 // Tiempo pesimista
+        act.te = duration;                     // Tiempo esperado (ya calculado)
+        
+        // Desviación estándar y varianza
+        act.sigma = (act.tp - act.to) / 6;
+        act.variance = Math.pow(act.sigma, 2);
+        
+        console.log(`${actName}: Slack=${act.slack}, Critical=${act.isCritical}, To=${act.to}, Tm=${act.tm}, Tp=${act.tp}, σ=${act.sigma.toFixed(2)}, Var=${act.variance.toFixed(2)}`);
     });
 
     console.log('=== CÁLCULO PERT COMPLETADO ===');
