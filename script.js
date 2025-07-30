@@ -708,6 +708,9 @@ function generateDiagram() {
     document.getElementById('projectDuration').textContent = projectDuration;
     document.getElementById('criticalPathInfo').style.display = 'block';
     
+    // Mostrar tabla resumen
+    displaySummaryTable(activityMap);
+    
     // Mostrar tabla de resultados
     displayResultsTable(activityMap);
 }
@@ -933,6 +936,78 @@ function displayResultsTable(activityMap) {
     resultsSection.insertAdjacentHTML('beforeend', statsHtml);
     
     resultsSection.style.display = 'block';
+}
+
+function displaySummaryTable(activityMap) {
+    const tbody = document.getElementById('summaryTableBody');
+    tbody.innerHTML = '';
+    
+    activities.forEach(activity => {
+        const data = activityMap[activity.name];
+        const row = document.createElement('tr');
+        
+        // Determinar el estado de la actividad
+        let status = '';
+        let statusClass = '';
+        
+        if (data.isCritical) {
+            status = 'CRÍTICA';
+            statusClass = 'status-critical';
+            row.className = 'critical-activity';
+        } else if (data.slack > 0 && data.slack <= 2) {
+            status = 'FLEXIBLE';
+            statusClass = 'status-flexible';
+            row.className = 'normal-activity';
+        } else {
+            status = 'NORMAL';
+            statusClass = 'status-normal';
+            row.className = 'normal-activity';
+        }
+        
+        row.innerHTML = `
+            <td><strong>${activity.name}</strong></td>
+            <td>${activity.duration}</td>
+            <td>${data.te}</td>
+            <td>${data.tl}</td>
+            <td>${data.tf}</td>
+            <td>${data.ti}</td>
+            <td>${data.slack.toFixed(1)}</td>
+            <td style="color: ${data.isCritical ? '#d32f2f' : '#4caf50'}; font-weight: bold;">
+                ${data.isCritical ? '✓' : '✗'}
+            </td>
+            <td>
+                <span class="status-badge ${statusClass}">${status}</span>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+    
+    // Calcular el tiempo total del proyecto
+    const projectDuration = Math.max(...activities.map(a => activityMap[a.name].tf));
+    const criticalActivities = activities.filter(act => activityMap[act.name].isCritical);
+    const totalCriticalActivities = criticalActivities.length;
+    
+    // Agregar fila de total del proyecto
+    const totalRow = document.createElement('tr');
+    totalRow.style.backgroundColor = '#e8f5e8';
+    totalRow.style.fontWeight = 'bold';
+    totalRow.style.borderTop = '3px solid #4caf50';
+    totalRow.innerHTML = `
+        <td style="color: #2e7d32;"><strong>TOTAL DEL PROYECTO</strong></td>
+        <td style="color: #2e7d32;">${projectDuration}</td>
+        <td>-</td>
+        <td>-</td>
+        <td style="color: #2e7d32;">${projectDuration}</td>
+        <td>-</td>
+        <td>0</td>
+        <td style="color: #2e7d32;">-</td>
+        <td>
+            <span class="status-badge" style="background: #4caf50; color: white;">COMPLETO</span>
+        </td>
+    `;
+    tbody.appendChild(totalRow);
+    
+    document.getElementById('summarySection').style.display = 'block';
 }
 
 window.addEventListener('load', function() {
@@ -1726,7 +1801,7 @@ function openPrintView() {
                     flex-direction: column !important;
                     justify-content: center !important;
                     align-items: center !important;
-                    font-size: 12px !important;
+                                       font-size: 12px !important;
                     font-weight: bold !important;
                     color: #000000 !important;
                 }
@@ -1828,10 +1903,4 @@ function closeAlternativeModal() {
         document.body.removeChild(modal);
     }
 }
-
-// Hacer funciones globales
-window.openPrintView = openPrintView;
-window.showScreenshotInstructions = showScreenshotInstructions;
-window.exportToSVG = exportToSVG;
-window.closeAlternativeModal = closeAlternativeModal;
 
